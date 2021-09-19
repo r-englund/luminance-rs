@@ -19,8 +19,8 @@ thread_local!(static TLS_ACQUIRE_GFX_STATE: RefCell<Option<()>> = RefCell::new(S
 pub(crate) struct BindingStack {
   pub(crate) next_texture_unit: u32,
   pub(crate) free_texture_units: Vec<u32>,
-  pub(crate) next_buffer_binding: u32,
-  pub(crate) free_buffer_bindings: Vec<u32>,
+  pub(crate) next_shader_data_binding: u32,
+  pub(crate) free_shader_data_bindings: Vec<u32>,
 }
 
 impl BindingStack {
@@ -29,8 +29,8 @@ impl BindingStack {
     BindingStack {
       next_texture_unit: 0,
       free_texture_units: Vec::new(),
-      next_buffer_binding: 0,
-      free_buffer_bindings: Vec::new(),
+      next_shader_data_binding: 0,
+      free_shader_data_bindings: Vec::new(),
     }
   }
 }
@@ -754,6 +754,27 @@ impl GLState {
     if bind == Bind::Forced || self.bound_element_array_buffer != handle {
       gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, handle);
       self.bound_element_array_buffer = handle;
+    }
+  }
+
+  pub(crate) unsafe fn bind_uniform_buffer(&mut self, handle: GLuint, binding: u32) {
+    let binding_ = binding as usize;
+
+    match self.bound_uniform_buffers.get(binding_) {
+      Some(&handle_) if handle != handle_ => {
+        gl::BindBufferBase(gl::UNIFORM_BUFFER, binding as GLuint, handle);
+        self.bound_uniform_buffers[binding_] = handle;
+      }
+
+      None => {
+        gl::BindBufferBase(gl::UNIFORM_BUFFER, binding as GLuint, handle);
+
+        // not enough registered buffer bindings; let’s grow a bit more
+        self.bound_uniform_buffers.resize(binding_ + 1, 0);
+        self.bound_uniform_buffers[binding_] = handle;
+      }
+
+      _ => (), // cached
     }
   }
 

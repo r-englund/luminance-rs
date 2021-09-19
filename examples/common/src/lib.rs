@@ -37,6 +37,7 @@ pub mod offscreen;
 pub mod query_info;
 pub mod query_texture_texels;
 pub mod render_state;
+pub mod shader_data;
 pub mod shader_uniform_adapt;
 pub mod shader_uniforms;
 pub mod shared;

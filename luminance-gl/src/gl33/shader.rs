@@ -1,18 +1,21 @@
-use gl;
-use gl::types::*;
-use std::ffi::CString;
-use std::ptr::{null, null_mut};
-
-use crate::gl33::GL33;
-use luminance::backend::shader::{Shader, Uniformable};
-use luminance::pipeline::{BufferBinding, TextureBinding};
-use luminance::pixel::{SamplerType, Type as PixelType};
-use luminance::shader::{
-  ProgramError, StageError, StageType, TessellationStages, Uniform, UniformType, UniformWarning,
-  VertexAttribWarning,
+use gl::{self, types::*};
+use std::{
+  ffi::CString,
+  ptr::{null, null_mut},
 };
-use luminance::texture::{Dim, Dimensionable};
-use luminance::vertex::Semantics;
+
+use crate::gl33::{buffer::Buffer, GL33};
+use luminance::{
+  backend::shader::{Shader, ShaderData, Uniformable},
+  pipeline::{ShaderDataBinding, TextureBinding},
+  pixel::{SamplerType, Type as PixelType},
+  shader::{
+    ProgramError, ShaderDataError, StageError, StageType, TessellationStages, Uniform, UniformType,
+    UniformWarning, VertexAttribWarning,
+  },
+  texture::{Dim, Dimensionable},
+  vertex::Semantics,
+};
 
 #[derive(Debug)]
 pub struct Stage {
@@ -213,7 +216,7 @@ unsafe impl Shader for GL33 {
     T: Uniformable<Self>,
   {
     let uniform = match T::ty() {
-      UniformType::BufferBinding => uniform_builder.ask_uniform_block(name)?,
+      UniformType::ShaderDataBinding => uniform_builder.ask_uniform_block(name)?,
       _ => uniform_builder.ask_uniform(name)?,
     };
 
@@ -659,20 +662,6 @@ unsafe impl<'a> Uniformable<GL33> for &'a [[bool; 4]] {
   }
 }
 
-unsafe impl<T> Uniformable<GL33> for BufferBinding<T> {
-  unsafe fn ty() -> UniformType {
-    UniformType::BufferBinding
-  }
-
-  unsafe fn update(self, program: &mut Program, uniform: &Uniform<Self>) {
-    gl::UniformBlockBinding(
-      program.handle,
-      uniform.index() as GLuint,
-      self.binding() as GLuint,
-    )
-  }
-}
-
 unsafe impl<D, S> Uniformable<GL33> for TextureBinding<D, S>
 where
   D: Dimensionable,
@@ -720,5 +709,60 @@ where
 
   unsafe fn update(self, _: &mut Program, uniform: &Uniform<Self>) {
     gl::Uniform1i(uniform.index(), self.binding() as GLint)
+  }
+}
+
+unsafe impl<T> Uniformable<GL33> for ShaderDataBinding<T> {
+  unsafe fn ty() -> UniformType {
+    UniformType::ShaderDataBinding
+  }
+
+  unsafe fn update(self, program: &mut Program, uniform: &Uniform<Self>) {
+    gl::UniformBlockBinding(
+      program.handle,
+      uniform.index() as GLuint,
+      self.binding() as GLuint,
+    )
+  }
+}
+
+unsafe impl ShaderData<[f32; 2]> for GL33 {
+  type ShaderDataRepr = Buffer<[f32; 2]>;
+
+  unsafe fn new_shader_data(
+    &mut self,
+    values: impl AsRef<[[f32; 2]]>,
+  ) -> Result<Self::ShaderDataRepr, luminance::shader::ShaderDataError> {
+    Ok(Buffer::from_vec(self, values.as_ref().to_owned()))
+  }
+
+  unsafe fn get_shader_data(shader_data: &Self::ShaderDataRepr, i: usize) -> Option<[f32; 2]> {
+    shader_data.get(i)
+  }
+
+  unsafe fn set_shader_data(
+    shader_data: &mut Self::ShaderDataRepr,
+    i: usize,
+    x: [f32; 2],
+  ) -> Option<()> {
+    shader_data.slice_buffer_mut().ok()?[i] = x;
+    Some(())
+  }
+
+  unsafe fn update_shader_data(
+    shader_data: &mut Self::ShaderDataRepr,
+    i: usize,
+    values: impl Iterator<Item = [f32; 2]>,
+  ) -> Result<(), luminance::shader::ShaderDataError> {
+    let mut slice = shader_data
+      .slice_buffer_mut()
+      .map_err(|_| ShaderDataError::CannotUpdate(i))?;
+    let slice = &mut slice[i..];
+
+    for (value, item) in values.zip(slice) {
+      *item = value;
+    }
+
+    Ok(())
   }
 }

@@ -3,8 +3,8 @@
 //! This interface defines the low-level API shaders must implement to be usable.
 
 use crate::shader::{
-  ProgramError, StageError, StageType, TessellationStages, Uniform, UniformType, UniformWarning,
-  VertexAttribWarning,
+  ProgramError, ShaderDataError, StageError, StageType, TessellationStages, Uniform, UniformType,
+  UniformWarning, VertexAttribWarning,
 };
 use crate::vertex::Semantics;
 
@@ -54,4 +54,33 @@ pub unsafe trait Shader {
   unsafe fn unbound<T>(uniform_builder: &mut Self::UniformBuilderRepr) -> Uniform<T>
   where
     T: Uniformable<Self>;
+}
+
+/// Shader data backend.
+pub unsafe trait ShaderData<T> {
+  /// Representation of the data by the backend.
+  type ShaderDataRepr;
+
+  /// Build a new shader data from some values.
+  unsafe fn new_shader_data(
+    &mut self,
+    values: impl AsRef<[T]>,
+  ) -> Result<Self::ShaderDataRepr, ShaderDataError>;
+
+  /// Access an item at index `i`.
+  ///
+  /// Return `None` if `i` is out-of-bounds.
+  unsafe fn get_shader_data(shader_data: &Self::ShaderDataRepr, i: usize) -> Option<T>;
+
+  /// Set an item at index `i`.
+  ///
+  /// Return `None` if `i` is out-of-bounds.
+  unsafe fn set_shader_data(shader_data: &mut Self::ShaderDataRepr, i: usize, x: T) -> Option<()>;
+
+  /// Update several items at once starting at a given index.
+  unsafe fn update_shader_data(
+    shader_data: &mut Self::ShaderDataRepr,
+    i: usize,
+    values: impl Iterator<Item = T>,
+  ) -> Result<(), ShaderDataError>;
 }

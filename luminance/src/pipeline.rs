@@ -233,12 +233,13 @@ use crate::{
     color_slot::ColorSlot,
     depth_slot::DepthSlot,
     framebuffer::Framebuffer as FramebufferBackend,
-    pipeline::{Pipeline as PipelineBackend, PipelineBase, PipelineTexture},
+    pipeline::{Pipeline as PipelineBackend, PipelineBase, PipelineShaderData, PipelineTexture},
   },
   context::GraphicsContext,
   framebuffer::Framebuffer,
   pixel::Pixel,
   scissor::ScissorRegion,
+  shader::ShaderData,
   shading_gate::ShadingGate,
   texture::{Dimensionable, Texture},
 };
@@ -435,6 +436,25 @@ where
   {
     unsafe {
       B::bind_texture(&self.repr, &texture.repr).map(|repr| BoundTexture {
+        repr,
+        _phantom: PhantomData,
+      })
+    }
+  }
+
+  /// Bind a [`ShaderData`].
+  ///
+  /// Once the shader data is bound, the [`BoundShaderData`] object has to be dropped / die in order to be able to bind
+  /// the shader data again.
+  pub fn bind_shader_data<T>(
+    &'a self,
+    shader_data: &'a mut ShaderData<B, T>,
+  ) -> Result<BoundShaderData<'a, B, T>, PipelineError>
+  where
+    B: PipelineShaderData<T>,
+  {
+    unsafe {
+      B::bind_shader_data(&self.repr, &shader_data.repr).map(|repr| BoundShaderData {
         repr,
         _phantom: PhantomData,
       })
@@ -683,6 +703,67 @@ where
   pub fn binding(&self) -> TextureBinding<D, P::SamplerType> {
     let binding = unsafe { B::texture_binding(&self.repr) };
     TextureBinding {
+      binding,
+      _phantom: PhantomData,
+    }
+  }
+}
+
+/// An opaque [`ShaderData`] binding.
+///
+/// You can obtain such a type after having bound a [`ShaderData`] in a [`Pipeline`].
+///
+/// # Parametricity
+///
+/// - `T` is the type of the value in the shader data.
+pub struct ShaderDataBinding<T> {
+  binding: u32,
+  _phantom: PhantomData<*const T>,
+}
+
+impl<T> ShaderDataBinding<T> {
+  /// Access the underlying binding value.
+  ///
+  /// # Notes
+  ///
+  /// That value shouldn’t be read nor store, as it’s only meaningful for backend implementations.
+  pub fn binding(self) -> u32 {
+    self.binding
+  }
+}
+
+/// A _bound_ [`ShaderData`].
+///
+/// # Parametricity
+///
+/// - `B` is the backend type. It must implement [`PipelineTexture`].
+/// - `T` is the type of shader data.
+///
+/// # Notes
+///
+/// Once a [`ShaderData`] is bound, it can be used and passed around to shaders. In order to do so,
+/// you will need to pass a [`TextureBinding`] to your [`ProgramInterface`]. That value is unique
+/// to each [`BoundTexture`] and should always be asked — you shouldn’t cache them, for instance.
+///
+/// Getting a [`TextureBinding`] is a cheap operation and is performed via the
+/// [`BoundTexture::binding`] method.
+///
+/// [`ProgramInterface`]: crate::shader::ProgramInterface
+pub struct BoundShaderData<'a, B, T>
+where
+  B: PipelineShaderData<T>,
+{
+  repr: B::BoundShaderData,
+  _phantom: PhantomData<&'a ()>,
+}
+
+impl<B, T> From<&'_ BoundShaderData<'_, B, T>> for ShaderDataBinding<T>
+where
+  B: PipelineShaderData<T>,
+{
+  fn from(bound: &BoundShaderData<B, T>) -> Self {
+    let binding = unsafe { B::shader_data_binding(&bound.repr) };
+    Self {
       binding,
       _phantom: PhantomData,
     }

@@ -201,6 +201,7 @@ examples! {
   "query-info", query_info,
   "mrt", mrt,
   "skybox", skybox,
+  "shader-data", shader_data,
 
   // functional tests
   funtests:

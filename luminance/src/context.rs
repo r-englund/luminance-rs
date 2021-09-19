@@ -43,19 +43,25 @@
 //! let buffer = context.new_buffer_from_slice(slice).unwrap();
 //! ```
 
-use crate::backend::{
-  color_slot::ColorSlot, depth_slot::DepthSlot, framebuffer::Framebuffer as FramebufferBackend,
-  query::Query as QueryBackend, shader::Shader, tess::Tess as TessBackend,
-  texture::Texture as TextureBackend,
+use crate::{
+  backend::{
+    color_slot::ColorSlot,
+    depth_slot::DepthSlot,
+    framebuffer::Framebuffer as FramebufferBackend,
+    query::Query as QueryBackend,
+    shader::{Shader, ShaderData as ShaderDataBackend},
+    tess::Tess as TessBackend,
+    texture::Texture as TextureBackend,
+  },
+  framebuffer::{Framebuffer, FramebufferError},
+  pipeline::PipelineGate,
+  pixel::Pixel,
+  query::Query,
+  shader::{ProgramBuilder, ShaderData, ShaderDataError, Stage, StageError, StageType},
+  tess::{Deinterleaved, Interleaved, TessBuilder, TessVertexData},
+  texture::{Dimensionable, GenMipmaps, Sampler, Texture, TextureError},
+  vertex::Semantics,
 };
-use crate::framebuffer::{Framebuffer, FramebufferError};
-use crate::pipeline::PipelineGate;
-use crate::pixel::Pixel;
-use crate::query::Query;
-use crate::shader::{ProgramBuilder, Stage, StageError, StageType};
-use crate::tess::{Deinterleaved, Interleaved, TessBuilder, TessVertexData};
-use crate::texture::{Dimensionable, GenMipmaps, Sampler, Texture, TextureError};
-use crate::vertex::Semantics;
 
 /// Class of graphics context.
 ///
@@ -124,6 +130,19 @@ pub unsafe trait GraphicsContext: Sized {
     Sem: Semantics,
   {
     ProgramBuilder::new(self)
+  }
+
+  /// Create a new shader data from a slice of items.
+  ///
+  /// See the documentation of [`ShaderData::from_slice`] for further details.
+  fn new_shader_data<T>(
+    &mut self,
+    values: impl AsRef<[T]>,
+  ) -> Result<ShaderData<Self::Backend, T>, ShaderDataError>
+  where
+    Self::Backend: ShaderDataBackend<T>,
+  {
+    ShaderData::from_slice(self, values)
   }
 
   /// Create a [`TessBuilder`].

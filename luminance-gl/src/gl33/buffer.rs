@@ -136,6 +136,15 @@ impl<T> Buffer<T> {
   }
 }
 
+impl<T> Buffer<T>
+where
+  T: Copy,
+{
+  pub fn get(&self, i: usize) -> Option<T> {
+    self.buf.get(i).copied()
+  }
+}
+
 /// Wrapper to drop buffer slices.
 struct BufferSliceWrapper<'a> {
   handle: GLuint,

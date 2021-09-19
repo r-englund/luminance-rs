@@ -6,8 +6,9 @@ use crate::gl33::{
 };
 use luminance::{
   backend::{
-    pipeline::{Pipeline as PipelineBackend, PipelineBase, PipelineTexture},
+    pipeline::{Pipeline as PipelineBackend, PipelineBase, PipelineShaderData, PipelineTexture},
     render_gate::RenderGate,
+    shader::ShaderData as ShaderDataBackend,
     shading_gate::ShadingGate,
     tess::Tess,
     tess_gate::TessGate,
@@ -21,22 +22,25 @@ use luminance::{
 };
 use std::{cell::RefCell, marker::PhantomData, rc::Rc};
 
+use super::buffer::Buffer;
+
 pub struct Pipeline {
   state: Rc<RefCell<GLState>>,
 }
 
-pub struct BoundBuffer {
+pub struct BoundShaderData<T> {
   pub(crate) binding: u32,
   state: Rc<RefCell<GLState>>,
+  _phantom: PhantomData<*const T>,
 }
 
-impl Drop for BoundBuffer {
+impl<T> Drop for BoundShaderData<T> {
   fn drop(&mut self) {
     // place the binding into the free list
     let mut state = self.state.borrow_mut();
     state
       .binding_stack_mut()
-      .free_buffer_bindings
+      .free_shader_data_bindings
       .push(self.binding);
   }
 }
@@ -161,7 +165,7 @@ where
     let bstack = state.binding_stack_mut();
 
     let unit = bstack.free_texture_units.pop().unwrap_or_else(|| {
-      // no more free units; reserve one
+      // no more free units; reserve one
       let unit = bstack.next_texture_unit;
       bstack.next_texture_unit += 1;
       unit
@@ -178,6 +182,41 @@ where
 
   unsafe fn texture_binding(bound: &Self::BoundTextureRepr) -> u32 {
     bound.unit
+  }
+}
+
+unsafe impl<T> PipelineShaderData<T> for GL33
+where
+  Self: ShaderDataBackend<T, ShaderDataRepr = Buffer<T>>,
+{
+  type BoundShaderData = BoundShaderData<T>;
+
+  unsafe fn bind_shader_data(
+    pipeline: &Self::PipelineRepr,
+    shader_data: &Self::ShaderDataRepr,
+  ) -> Result<Self::BoundShaderData, PipelineError> {
+    let mut state = pipeline.state.borrow_mut();
+    let bstack = state.binding_stack_mut();
+
+    let binding = bstack.free_shader_data_bindings.pop().unwrap_or_else(|| {
+      // no more free units; reserve one
+      let binding = bstack.next_shader_data_binding;
+      bstack.next_shader_data_binding += 1;
+      binding
+    });
+
+    let shader_data: &Buffer<T> = shader_data.into();
+    state.bind_uniform_buffer(shader_data.handle(), binding);
+
+    Ok(BoundShaderData {
+      binding,
+      state: pipeline.state.clone(),
+      _phantom: PhantomData,
+    })
+  }
+
+  unsafe fn shader_data_binding(bound: &<Self as PipelineShaderData<T>>::BoundShaderData) -> u32 {
+    bound.binding
   }
 }
 

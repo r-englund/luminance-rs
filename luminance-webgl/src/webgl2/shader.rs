@@ -274,7 +274,7 @@ unsafe impl Shader for WebGL2 {
   {
     let ty = T::ty();
     let uniform = match ty {
-      UniformType::BufferBinding => uniform_builder.ask_uniform_block(name)?,
+      UniformType::ShaderDataBinding => uniform_builder.ask_uniform_block(name)?,
       _ => uniform_builder.ask_uniform(name)?,
     };
 
@@ -789,7 +789,7 @@ unsafe impl<'a> Uniformable<WebGL2> for &'a [[bool; 4]] {
 
 unsafe impl<T> Uniformable<WebGL2> for BufferBinding<T> {
   unsafe fn ty() -> UniformType {
-    UniformType::BufferBinding
+    UniformType::ShaderDataBinding
   }
 
   unsafe fn update(self, program: &mut Program, uniform: &Uniform<Self>) {

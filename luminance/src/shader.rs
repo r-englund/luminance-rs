@@ -141,13 +141,12 @@
 //! [`BoundBuffer`]: crate::pipeline::BoundBuffer
 //! [`BufferBinding`]: crate::pipeline::BufferBinding
 
-use std::error;
-use std::fmt;
-use std::marker::PhantomData;
-
-use crate::backend::shader::{Shader, Uniformable};
-use crate::context::GraphicsContext;
-use crate::vertex::Semantics;
+use crate::{
+  backend::shader::{Shader, ShaderData as ShaderDataBackend, Uniformable},
+  context::GraphicsContext,
+  vertex::Semantics,
+};
+use std::{error, fmt, marker::PhantomData};
 
 /// A shader stage type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -588,9 +587,9 @@ pub enum UniformType {
   /// Floating-point cubemap sampler.
   Cubemap,
 
-  // buffer
-  /// Buffer binding; used for UBOs.
-  BufferBinding,
+  // shader data
+  /// Shader data binding.
+  ShaderDataBinding,
 }
 
 impl fmt::Display for UniformType {
@@ -640,7 +639,7 @@ impl fmt::Display for UniformType {
       UniformType::ICubemap => f.write_str("isamplerCube"),
       UniformType::UICubemap => f.write_str("usamplerCube"),
       UniformType::Cubemap => f.write_str("samplerCube"),
-      UniformType::BufferBinding => f.write_str("buffer binding"),
+      UniformType::ShaderDataBinding => f.write_str("shader data binding"),
     }
   }
 }
@@ -1210,4 +1209,75 @@ where
   {
     self.adapt_env(env)
   }
+}
+
+/// Shader data.
+///
+/// When a backend supports _shader data_ and implements this trait, it is possible to create large typed arrays that
+/// can be accessed from shaders. This kind of storage is useful when regular uniforms are too small.
+///
+/// Shader data, unlike shader uniforms, are not linked to a given shader and thus don’t require creating the data from
+/// the shader directly. However, since shaders must know about the data, the shader and the shader data must be
+/// compatible at the type level. The way this is done is by adding an extra, optional type variable to shader
+/// [`Program`]s so that they know some shader data will be available.
+///
+/// Shader data is typed and has a name, so that the shader can reference it. For instance, a shader data representing
+/// instances’ matrices can be referenced as `"instances"` in the shader. This is part of the API of the shader.
+///
+/// Shader data is made available to the user by binding it in a graphics pipeline.
+///
+/// # Parametricity
+///
+/// - `B` is the backend type.
+/// - `T` is the type of the carried items.
+pub struct ShaderData<B, T>
+where
+  B: ?Sized + ShaderDataBackend<T>,
+{
+  pub(crate) repr: B::ShaderDataRepr,
+}
+
+impl<B, T> ShaderData<B, T>
+where
+  B: ?Sized + ShaderDataBackend<T>,
+{
+  /// Create a [`ShaderData`] out of a set of values.
+  pub fn from_slice(
+    ctx: &mut impl GraphicsContext<Backend = B>,
+    values: impl AsRef<[T]>,
+  ) -> Result<Self, ShaderDataError> {
+    let repr = unsafe { ctx.backend().new_shader_data(values)? };
+    Ok(ShaderData { repr })
+  }
+
+  /// Access a value at index `i`.
+  ///
+  /// Return `None` if `i` is out-of-bounds.
+  pub fn get(&self, i: usize) -> Option<T> {
+    unsafe { B::get_shader_data(&self.repr, i) }
+  }
+
+  /// Set the item at index `i` with value `x`.
+  ///
+  /// Return `None` if `i` is out-of-bounds.
+  pub fn set(&mut self, i: usize, x: T) -> Option<()> {
+    unsafe { B::set_shader_data(&mut self.repr, i, x) }
+  }
+
+  /// Update several items at once starting at a given index.
+  pub fn update(
+    &mut self,
+    i: usize,
+    values: impl IntoIterator<Item = T>,
+  ) -> Result<(), ShaderDataError> {
+    unsafe { B::update_shader_data(&mut self.repr, i, values.into_iter()) }
+  }
+}
+
+/// Possible errors that can occur with shader data.
+#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ShaderDataError {
+  /// Cannot update shader data values starting at index.
+  CannotUpdate(usize),
 }

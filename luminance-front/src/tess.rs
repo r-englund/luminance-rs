@@ -2,7 +2,7 @@ use crate::Backend;
 
 pub use luminance::tess::{
   Deinterleaved, DeinterleavedData, Interleaved, Mode, TessError, TessIndexType, TessMapError,
-  TessViewError,
+  TessViewError, View,
 };
 
 pub type TessBuilder<'a, V, I = (), W = (), S = Interleaved> =
