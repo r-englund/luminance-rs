@@ -279,7 +279,7 @@ unsafe impl Shader for WebGL2 {
     };
 
     let state = uniform_builder.state.borrow();
-    uniform_type_match(&state, &uniform_builder.handle, name, ty)?;
+    uniform_type_match(&state, &uniform_builder.handle, uniform.index(), name, ty)?;
 
     Ok(uniform)
   }
@@ -313,30 +313,14 @@ fn patch_shader_src(src: &str) -> String {
 fn uniform_type_match(
   state: &WebGL2State,
   program: &WebGlProgram,
+  index: i32,
   name: &str,
   ty: UniformType,
 ) -> Result<(), UniformWarning> {
-  // create a 1-item array to hold the name of the uniform we’d like to get information from
-  let name_array = js_sys::Array::new();
-  name_array.push(&name.into()); // push the name as a JsValue
-
-  // get the index of the uniform; it’s represented as an array of a single element, since our
-  // input has only one element
-  let index = state
-    .ctx
-    .get_uniform_indices(program, name_array.as_ref())
-    .ok_or_else(|| UniformWarning::TypeMismatch("cannot retrieve uniform index".to_owned(), ty))?
-    .get(0)
-    .as_f64()
-    .map(|x| x as u32)
-    .ok_or_else(|| {
-      UniformWarning::TypeMismatch("wrong type when retrieving uniform".to_owned(), ty)
-    })?;
-
   // get its size and type
   let info = state
     .ctx
-    .get_active_uniform(program, index)
+    .get_active_uniform(program, index as _)
     .ok_or_else(|| UniformWarning::TypeMismatch("cannot retrieve active uniform".to_owned(), ty))?;
 
   // early-return if array – we don’t support them yet

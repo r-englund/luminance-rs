@@ -220,7 +220,7 @@ unsafe impl Shader for GL33 {
       _ => uniform_builder.ask_uniform(name)?,
     };
 
-    uniform_type_match(uniform_builder.handle, name, T::ty())?;
+    uniform_type_match(uniform_builder.handle, name, uniform.index(), T::ty())?;
 
     Ok(uniform)
   }
@@ -257,7 +257,12 @@ fn glsl_pragma_src(src: &str) -> String {
   pragma
 }
 
-fn uniform_type_match(program: GLuint, name: &str, ty: UniformType) -> Result<(), UniformWarning> {
+fn uniform_type_match(
+  program: GLuint,
+  name: &str,
+  index: i32,
+  ty: UniformType,
+) -> Result<(), UniformWarning> {
   let mut size: GLint = 0;
   let mut glty: GLuint = 0;
 
@@ -266,22 +271,11 @@ fn uniform_type_match(program: GLuint, name: &str, ty: UniformType) -> Result<()
     let mut max_len = 0;
     gl::GetProgramiv(program, gl::ACTIVE_UNIFORM_MAX_LENGTH, &mut max_len);
 
-    // get the index of the uniform
-    let mut index = 0;
-
-    let c_name = CString::new(name.as_bytes()).unwrap();
-    gl::GetUniformIndices(
-      program,
-      1,
-      [c_name.as_ptr() as *const GLchar].as_ptr(),
-      &mut index,
-    );
-
     // get its size and type
     let mut name_ = Vec::<GLchar>::with_capacity(max_len as usize);
     gl::GetActiveUniform(
       program,
-      index,
+      index as _,
       max_len,
       null_mut(),
       &mut size,
