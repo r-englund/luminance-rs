@@ -1,21 +1,21 @@
 //! Shader support for WebGL2.
 
-use luminance::backend::shader::{Shader, Uniformable};
-use luminance::pipeline::{BufferBinding, TextureBinding};
-use luminance::pixel::{SamplerType, Type as PixelType};
-use luminance::shader::{
-  ProgramError, StageError, StageType, TessellationStages, Uniform, UniformType, UniformWarning,
-  VertexAttribWarning,
+use crate::webgl2::{state::WebGL2State, WebGL2};
+use luminance::{
+  backend::shader::{Shader, ShaderData, Uniformable},
+  pipeline::{ShaderDataBinding, TextureBinding},
+  pixel::{SamplerType, Type as PixelType},
+  shader::{
+    ProgramError, ShaderDataError, StageError, StageType, TessellationStages, Uniform, UniformType,
+    UniformWarning, VertexAttribWarning,
+  },
+  texture::{Dim, Dimensionable},
+  vertex::Semantics,
 };
-use luminance::texture::{Dim, Dimensionable};
-use luminance::vertex::Semantics;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use web_sys::{WebGl2RenderingContext, WebGlProgram, WebGlShader, WebGlUniformLocation};
 
-use crate::webgl2::state::WebGL2State;
-use crate::webgl2::WebGL2;
+use super::buffer::Buffer;
 
 #[derive(Debug)]
 pub struct Stage {
@@ -771,20 +771,6 @@ unsafe impl<'a> Uniformable<WebGL2> for &'a [[bool; 4]] {
   }
 }
 
-unsafe impl<T> Uniformable<WebGL2> for BufferBinding<T> {
-  unsafe fn ty() -> UniformType {
-    UniformType::ShaderDataBinding
-  }
-
-  unsafe fn update(self, program: &mut Program, uniform: &Uniform<Self>) {
-    program.state.borrow().ctx.uniform_block_binding(
-      &program.handle,
-      uniform.index() as u32,
-      self.binding(),
-    );
-  }
-}
-
 unsafe impl<D, S> Uniformable<WebGL2> for TextureBinding<D, S>
 where
   D: Dimensionable,
@@ -835,5 +821,78 @@ where
       program.location_map.borrow().get(&uniform.index()),
       self.binding() as i32,
     );
+  }
+}
+
+unsafe impl<T> Uniformable<WebGL2> for ShaderDataBinding<T> {
+  unsafe fn ty() -> UniformType {
+    UniformType::ShaderDataBinding
+  }
+
+  unsafe fn update(self, program: &mut Program, uniform: &Uniform<Self>) {
+    program.state.borrow().ctx.uniform_block_binding(
+      &program.handle,
+      uniform.index() as u32,
+      self.binding(),
+    );
+  }
+}
+
+pub trait Std140 {
+  type Encoding: Copy;
+
+  fn std140_encode(self) -> Self::Encoding;
+  fn std140_decode(encoded: Self::Encoding) -> Self;
+}
+
+// [f32; 2] is stored as ([f32; 2], f64) because WebGL wants two f64 instead of two f32, wait what?
+impl Std140 for [f32; 2] {
+  type Encoding = [f32; 4];
+
+  fn std140_encode(self) -> Self::Encoding {
+    [self[0], self[1], 0., 0.]
+  }
+
+  fn std140_decode([a, b, _, _]: Self::Encoding) -> Self {
+    [a, b]
+  }
+}
+
+unsafe impl<T> ShaderData<T> for WebGL2
+where
+  T: Std140,
+{
+  type ShaderDataRepr = Buffer<T::Encoding, { WebGl2RenderingContext::UNIFORM_BUFFER }>;
+
+  unsafe fn new_shader_data(
+    &mut self,
+    values: impl Iterator<Item = T>,
+  ) -> Result<Self::ShaderDataRepr, ShaderDataError> {
+    let values = values.map(T::std140_encode).collect();
+    Buffer::from_vec(self, values).map_err(|_| ShaderDataError::CannotCreate)
+  }
+
+  unsafe fn get_shader_data(shader_data: &Self::ShaderDataRepr, i: usize) -> Option<T> {
+    shader_data.get(i).map(T::std140_decode)
+  }
+
+  unsafe fn set_shader_data(shader_data: &mut Self::ShaderDataRepr, i: usize, x: T) -> Option<()> {
+    shader_data.slice_buffer_mut()[i] = x.std140_encode();
+    Some(())
+  }
+
+  unsafe fn update_shader_data(
+    shader_data: &mut Self::ShaderDataRepr,
+    i: usize,
+    values: impl Iterator<Item = T>,
+  ) -> Result<(), ShaderDataError> {
+    let mut slice = shader_data.slice_buffer_mut();
+    let slice = &mut slice[i..];
+
+    for (value, item) in values.zip(slice) {
+      *item = value.std140_encode();
+    }
+
+    Ok(())
   }
 }

@@ -1,26 +1,28 @@
 //! Pipeline support for WebGL2.
 
-use luminance::backend::pipeline::{Pipeline as PipelineBackend, PipelineBase, PipelineTexture};
-use luminance::backend::render_gate::RenderGate;
-use luminance::backend::shading_gate::ShadingGate;
-use luminance::backend::tess::Tess;
-use luminance::backend::tess_gate::TessGate;
-use luminance::blending::BlendingMode;
-use luminance::pipeline::{PipelineError, PipelineState, Viewport};
-use luminance::pixel::Pixel;
-use luminance::render_state::RenderState;
-use luminance::tess::{Deinterleaved, DeinterleavedData, Interleaved, TessIndex, TessVertexData};
-use luminance::texture::Dimensionable;
-use std::cell::RefCell;
-use std::marker::PhantomData;
-use std::rc::Rc;
-use web_sys::WebGl2RenderingContext;
-
+use super::{buffer::Buffer, shader::Std140};
 use crate::webgl2::{
   array_buffer::IntoArrayBuffer,
   state::{BlendingState, DepthTest, FaceCullingState, ScissorState, WebGL2State},
   WebGL2,
 };
+use luminance::backend::pipeline::{
+  Pipeline as PipelineBackend, PipelineBase, PipelineShaderData, PipelineTexture,
+};
+use luminance::{
+  backend::{
+    render_gate::RenderGate, shader::ShaderData, shading_gate::ShadingGate, tess::Tess,
+    tess_gate::TessGate,
+  },
+  blending::BlendingMode,
+  pipeline::{PipelineError, PipelineState, Viewport},
+  pixel::Pixel,
+  render_state::RenderState,
+  tess::{Deinterleaved, DeinterleavedData, Interleaved, TessIndex, TessVertexData},
+  texture::Dimensionable,
+};
+use std::{cell::RefCell, marker::PhantomData, rc::Rc};
+use web_sys::WebGl2RenderingContext;
 
 pub struct Pipeline {
   state: Rc<RefCell<WebGL2State>>,
@@ -49,6 +51,24 @@ where
       .binding_stack_mut()
       .free_texture_units
       .push(self.unit);
+  }
+}
+
+pub struct BoundShaderData<T> {
+  pub(crate) binding: u32,
+  state: Rc<RefCell<WebGL2State>>,
+  _phantom: PhantomData<*const T>,
+}
+
+impl<T> Drop for BoundShaderData<T> {
+  fn drop(&mut self) {
+    // place the binding into the free list
+    self
+      .state
+      .borrow_mut()
+      .binding_stack_mut()
+      .free_shader_data_bindings
+      .push(self.binding);
   }
 }
 
@@ -163,6 +183,42 @@ where
 
   unsafe fn texture_binding(bound: &Self::BoundTextureRepr) -> u32 {
     bound.unit
+  }
+}
+
+unsafe impl<T> PipelineShaderData<T> for WebGL2
+where
+  Self:
+    ShaderData<T, ShaderDataRepr = Buffer<T::Encoding, { WebGl2RenderingContext::UNIFORM_BUFFER }>>,
+  T: Std140,
+{
+  type BoundShaderData = BoundShaderData<T>;
+
+  unsafe fn bind_shader_data(
+    pipeline: &Self::PipelineRepr,
+    shader_data: &Self::ShaderDataRepr,
+  ) -> Result<Self::BoundShaderData, PipelineError> {
+    let mut state = pipeline.state.borrow_mut();
+    let bstack = state.binding_stack_mut();
+
+    let binding = bstack.free_shader_data_bindings.pop().unwrap_or_else(|| {
+      // no more shader data bindings; reserve one
+      let binding = bstack.next_shader_data_binding;
+      bstack.next_shader_data_binding += 1;
+      binding
+    });
+
+    state.bind_uniform_buffer(Some(shader_data.handle()), binding);
+
+    Ok(BoundShaderData {
+      binding,
+      state: pipeline.state.clone(),
+      _phantom: PhantomData,
+    })
+  }
+
+  unsafe fn shader_data_binding(bound: &Self::BoundShaderData) -> u32 {
+    bound.binding
   }
 }
 

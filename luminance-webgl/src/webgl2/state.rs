@@ -17,8 +17,8 @@ use web_sys::{
 pub(crate) struct BindingStack {
   pub(crate) next_texture_unit: u32,
   pub(crate) free_texture_units: Vec<u32>,
-  pub(crate) next_buffer_binding: u32,
-  pub(crate) free_buffer_bindings: Vec<u32>,
+  pub(crate) next_shader_data_binding: u32,
+  pub(crate) free_shader_data_bindings: Vec<u32>,
 }
 
 impl BindingStack {
@@ -27,8 +27,8 @@ impl BindingStack {
     BindingStack {
       next_texture_unit: 0,
       free_texture_units: Vec::new(),
-      next_buffer_binding: 0,
-      free_buffer_bindings: Vec::new(),
+      next_shader_data_binding: 0,
+      free_shader_data_bindings: Vec::new(),
     }
   }
 }
@@ -236,17 +236,28 @@ impl WebGL2State {
     }
   }
 
-  pub(crate) fn unbind_buffer(&mut self, buffer: &WebGlBuffer) {
-    if self.bound_array_buffer.as_ref() == Some(buffer) {
-      self.bind_array_buffer(None, Bind::Cached);
-    } else if self.bound_element_array_buffer.as_ref() == Some(buffer) {
-      self.bind_element_array_buffer(None, Bind::Cached);
-    } else if let Some(handle_) = self
-      .bound_uniform_buffers
-      .iter_mut()
-      .find(|h| h.as_ref() == Some(buffer))
-    {
-      *handle_ = None;
+  pub(crate) fn bind_uniform_buffer(&mut self, handle: Option<&WebGlBuffer>, binding: u32) {
+    let binding_ = binding as usize;
+
+    match self.bound_uniform_buffers.get(binding_) {
+      Some(handle_) if handle != handle_.as_ref() => {
+        self
+          .ctx
+          .bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, binding, handle);
+        self.bound_uniform_buffers[binding_] = handle.cloned();
+      }
+
+      None => {
+        self
+          .ctx
+          .bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, binding, handle);
+
+        // not enough registered buffer bindings; let’s grow a bit more
+        self.bound_uniform_buffers.resize(binding_ + 1, None);
+        self.bound_uniform_buffers[binding_] = handle.cloned();
+      }
+
+      _ => (), // cached
     }
   }
 
@@ -987,7 +998,7 @@ fn load_webgl2_extensions(ctx: &mut WebGl2RenderingContext) -> Result<(), StateQ
 
 /// Should the binding be cached or forced to the provided value?
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum Bind {
+pub enum Bind {
   Forced,
   Cached,
 }

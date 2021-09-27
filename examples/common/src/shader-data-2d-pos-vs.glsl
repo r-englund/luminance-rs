@@ -3,7 +3,7 @@ in vec3 color;
 
 out vec3 v_color;
 
-uniform Positions {
+layout(std140) uniform Positions {
   vec2[100] p;
 } positions;
 

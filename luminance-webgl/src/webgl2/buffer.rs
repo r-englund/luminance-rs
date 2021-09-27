@@ -44,39 +44,31 @@ impl From<BufferError> for TessError {
 ///
 /// Used to drop the buffer.
 #[derive(Clone, Debug)]
-struct BufferWrapper {
+struct BufferWrapper<const TARGET: u32> {
   handle: WebGlBuffer,
-  /// Target the buffer was created with; WebGL2 doesn’t play well with rebinding a buffer to a different target (unlike
-  /// OpenGL, in which that optimization is handy).
-  ///
-  /// See https://developer.mozilla.org/en-US/docs/Web/API/WebGLRenderingContext/bindBuffer#exceptions for further details
-  target: u32,
   state: Rc<RefCell<WebGL2State>>,
 }
 
-impl Drop for BufferWrapper {
+impl<const TARGET: u32> Drop for BufferWrapper<TARGET> {
   fn drop(&mut self) {
-    let mut state = self.state.borrow_mut();
-
-    state.unbind_buffer(&self.handle);
+    let state = self.state.borrow_mut();
     state.ctx.delete_buffer(Some(&self.handle));
   }
 }
 
 /// WebGL buffer.
 #[derive(Clone, Debug)]
-pub struct Buffer<T> {
+pub struct Buffer<T, const TARGET: u32> {
   /// A cached version of the GPU buffer; emulate persistent mapping.
   pub(crate) buf: Vec<T>,
-  gl_buf: BufferWrapper,
+  gl_buf: BufferWrapper<TARGET>,
 }
 
-impl<T> Buffer<T> {
-  pub(crate) fn from_vec(
-    webgl2: &mut WebGL2,
-    vec: Vec<T>,
-    target: u32,
-  ) -> Result<Self, BufferError> {
+impl<T, const TARGET: u32> Buffer<T, TARGET>
+where
+  WebGL2State: BindBuffer<TARGET>,
+{
+  pub(crate) fn from_vec(webgl2: &mut WebGL2, vec: Vec<T>) -> Result<Self, BufferError> {
     let mut state = webgl2.state.borrow_mut();
     let len = vec.len();
 
@@ -84,17 +76,16 @@ impl<T> Buffer<T> {
       .create_buffer()
       .ok_or_else(|| BufferError::CannotCreate)?;
 
-    bind_buffer(&mut state, &handle, target, Bind::Forced)?;
+    state.bind_buffer(&handle, Bind::Forced);
 
     let bytes = mem::size_of::<T>() * len;
     let data = unsafe { slice::from_raw_parts(vec.as_ptr() as *const _, bytes) };
     state
       .ctx
-      .buffer_data_with_u8_array(target, data, WebGl2RenderingContext::STREAM_DRAW);
+      .buffer_data_with_u8_array(TARGET, data, WebGl2RenderingContext::STREAM_DRAW);
 
     let gl_buf = BufferWrapper {
       handle,
-      target,
       state: webgl2.state.clone(),
     };
 
@@ -114,9 +105,8 @@ impl<T> Buffer<T> {
     }
   }
 
-  pub(crate) fn slice_buffer_mut(&mut self) -> BufferSliceMut<T> {
+  pub(crate) fn slice_buffer_mut(&mut self) -> BufferSliceMut<T, TARGET> {
     let raw = BufferSliceMutWrapper {
-      target: self.gl_buf.target,
       handle: &self.gl_buf.handle,
       ptr: self.buf.as_mut_ptr() as *mut u8,
       bytes: self.buf.len() * mem::size_of::<T>(),
@@ -127,6 +117,15 @@ impl<T> Buffer<T> {
       raw,
       _phantom: PhantomData,
     }
+  }
+}
+
+impl<T, const TARGET: u32> Buffer<T, TARGET>
+where
+  T: Copy,
+{
+  pub fn get(&self, i: usize) -> Option<T> {
+    self.buf.get(i).copied()
   }
 }
 
@@ -169,39 +168,43 @@ impl<T> Deref for BufferSlice<'_, T> {
 ///
 /// When a buffer is mapped, we are the only owner of it. We can then read or write from/to the
 /// mapped buffer, and then update the GPU buffer on the [`Drop`] implementation.
-pub struct BufferSliceMutWrapper<'a> {
-  target: u32,
+pub struct BufferSliceMutWrapper<'a, const TARGET: u32>
+where
+  WebGL2State: BindBuffer<TARGET>,
+{
   handle: &'a WebGlBuffer,
   ptr: *mut u8,
   bytes: usize,
   state: Rc<RefCell<WebGL2State>>,
 }
 
-impl Drop for BufferSliceMutWrapper<'_> {
+impl<'a, const TARGET: u32> Drop for BufferSliceMutWrapper<'a, TARGET>
+where
+  WebGL2State: BindBuffer<TARGET>,
+{
   fn drop(&mut self) {
     let mut state = self.state.borrow_mut();
-    let _ = update_webgl_buffer(
-      self.target,
-      &mut state,
-      &self.handle,
-      self.ptr,
-      self.bytes,
-      0,
-    );
+    let _ = update_webgl_buffer::<TARGET>(&mut state, &self.handle, self.ptr, self.bytes, 0);
   }
 }
 
-pub struct BufferSliceMut<'a, T> {
-  raw: BufferSliceMutWrapper<'a>,
+pub struct BufferSliceMut<'a, T, const TARGET: u32>
+where
+  WebGL2State: BindBuffer<TARGET>,
+{
+  raw: BufferSliceMutWrapper<'a, TARGET>,
   _phantom: PhantomData<T>,
 }
 
-impl<'a> BufferSliceMut<'a, u8> {
+impl<'a, const TARGET: u32> BufferSliceMut<'a, u8, TARGET>
+where
+  WebGL2State: BindBuffer<TARGET>,
+{
   /// Transmute to another type.
   ///
   /// This method is highly unsafe and should only be used when certain the target type is the
   /// one actually represented by the raw bytes.
-  pub(crate) unsafe fn transmute<T>(self) -> BufferSliceMut<'a, T> {
+  pub(crate) unsafe fn transmute<T>(self) -> BufferSliceMut<'a, T, TARGET> {
     BufferSliceMut {
       raw: self.raw,
       _phantom: PhantomData,
@@ -209,7 +212,10 @@ impl<'a> BufferSliceMut<'a, u8> {
   }
 }
 
-impl<T> Deref for BufferSliceMut<'_, T> {
+impl<T, const TARGET: u32> Deref for BufferSliceMut<'_, T, TARGET>
+where
+  WebGL2State: BindBuffer<TARGET>,
+{
   type Target = [T];
 
   fn deref(&self) -> &Self::Target {
@@ -222,7 +228,10 @@ impl<T> Deref for BufferSliceMut<'_, T> {
   }
 }
 
-impl<T> DerefMut for BufferSliceMut<'_, T> {
+impl<T, const TARGET: u32> DerefMut for BufferSliceMut<'_, T, TARGET>
+where
+  WebGL2State: BindBuffer<TARGET>,
+{
   fn deref_mut(&mut self) -> &mut Self::Target {
     unsafe {
       slice::from_raw_parts_mut(self.raw.ptr as *mut T, self.raw.bytes / mem::size_of::<T>())
@@ -230,43 +239,50 @@ impl<T> DerefMut for BufferSliceMut<'_, T> {
   }
 }
 
-/// Bind a buffer to a given state regarding the input target.
-fn bind_buffer(
-  state: &mut WebGL2State,
-  handle: &WebGlBuffer,
-  target: u32,
-  bind_mode: Bind,
-) -> Result<(), BufferError> {
-  // depending on the buffer target, we are not going to bind it the same way, as the first bind
-  // is actually meaningful in WebGL2
-  match target {
-    WebGl2RenderingContext::ARRAY_BUFFER => state.bind_array_buffer(Some(handle), bind_mode),
-    WebGl2RenderingContext::ELEMENT_ARRAY_BUFFER => {
-      state.bind_element_array_buffer(Some(handle), bind_mode)
-    }
-
-    // a bit opaque but should never happen
-    _ => return Err(BufferError::CannotCreate),
-  }
-
-  Ok(())
-}
-
 /// Update a WebGL buffer by copying an input slice.
-fn update_webgl_buffer(
-  target: u32,
+fn update_webgl_buffer<const TARGET: u32>(
   state: &mut WebGL2State,
   handle: &WebGlBuffer,
   data: *const u8,
   bytes: usize,
   offset: usize,
-) -> Result<(), BufferError> {
-  bind_buffer(state, handle, target, Bind::Cached)?;
+) -> Result<(), BufferError>
+where
+  WebGL2State: BindBuffer<TARGET>,
+{
+  state.bind_buffer(handle, Bind::Cached);
 
   let data = unsafe { slice::from_raw_parts(data as _, bytes) };
   state
     .ctx
-    .buffer_sub_data_with_i32_and_u8_array_and_src_offset(target, offset as _, data, 0);
+    .buffer_sub_data_with_i32_and_u8_array_and_src_offset(TARGET, offset as _, data, 0);
 
   Ok(())
+}
+
+/// Bind a buffer indexed by target.
+///
+/// This trait is a small helper to bind buffer without carrying around their target. The target only lives at
+/// compile-time so all the code is indexed by it. It’s magic, it’s a smart fox.
+pub trait BindBuffer<const TARGET: u32> {
+  fn bind_buffer(&mut self, handle: &WebGlBuffer, bind: Bind);
+}
+
+impl BindBuffer<{ WebGl2RenderingContext::ARRAY_BUFFER }> for WebGL2State {
+  fn bind_buffer(&mut self, handle: &WebGlBuffer, bind: Bind) {
+    self.bind_array_buffer(Some(handle), bind)
+  }
+}
+
+impl BindBuffer<{ WebGl2RenderingContext::ELEMENT_ARRAY_BUFFER }> for WebGL2State {
+  fn bind_buffer(&mut self, handle: &WebGlBuffer, bind: Bind) {
+    self.bind_element_array_buffer(Some(handle), bind)
+  }
+}
+
+impl BindBuffer<{ WebGl2RenderingContext::UNIFORM_BUFFER }> for WebGL2State {
+  fn bind_buffer(&mut self, handle: &WebGlBuffer, _: Bind) {
+    // we bind at binding point 0 (because we know it will always be there)
+    self.bind_uniform_buffer(Some(handle), 0)
+  }
 }

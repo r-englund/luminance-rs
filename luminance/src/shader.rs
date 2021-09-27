@@ -1278,6 +1278,19 @@ where
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ShaderDataError {
+  /// Cannot create the shader data.
+  CannotCreate,
   /// Cannot update shader data values starting at index.
   CannotUpdate(usize),
+}
+
+impl fmt::Display for ShaderDataError {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match self {
+      ShaderDataError::CannotCreate => f.write_str("cannot create shader data"),
+      ShaderDataError::CannotUpdate(i) => {
+        write!(f, "cannot update shader data at index {}", i)
+      }
+    }
+  }
 }

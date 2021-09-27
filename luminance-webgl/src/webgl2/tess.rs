@@ -30,7 +30,7 @@ where
   mode: u32,
   // A small note: WebGL2 doesn’t support custom primitive restart index; it assumes the maximum
   // value of I as being that restart index.
-  index_buffer: Option<Buffer<I>>,
+  index_buffer: Option<Buffer<I, { WebGl2RenderingContext::ELEMENT_ARRAY_BUFFER }>>,
   state: Rc<RefCell<WebGL2State>>,
 }
 
@@ -110,8 +110,8 @@ where
   W: Vertex,
 {
   raw: TessRaw<I>,
-  vertex_buffer: Option<Buffer<V>>,
-  instance_buffer: Option<Buffer<W>>,
+  vertex_buffer: Option<Buffer<V, { WebGl2RenderingContext::ARRAY_BUFFER }>>,
+  instance_buffer: Option<Buffer<W, { WebGl2RenderingContext::ARRAY_BUFFER }>>,
 }
 
 unsafe impl<V, I, W> TessBackend<V, I, W, Interleaved> for WebGL2
@@ -205,7 +205,7 @@ where
   W: TessVertexData<Interleaved, Data = Vec<W>>,
 {
   type VertexSliceRepr = BufferSlice<'a, V>;
-  type VertexSliceMutRepr = BufferSliceMut<'a, V>;
+  type VertexSliceMutRepr = BufferSliceMut<'a, V, { WebGl2RenderingContext::ARRAY_BUFFER }>;
 
   unsafe fn vertices(tess: &'a mut Self::TessRepr) -> Result<Self::VertexSliceRepr, TessMapError> {
     match tess.vertex_buffer {
@@ -231,7 +231,7 @@ where
   W: TessVertexData<Interleaved, Data = Vec<W>>,
 {
   type IndexSliceRepr = BufferSlice<'a, I>;
-  type IndexSliceMutRepr = BufferSliceMut<'a, I>;
+  type IndexSliceMutRepr = BufferSliceMut<'a, I, { WebGl2RenderingContext::ELEMENT_ARRAY_BUFFER }>;
 
   unsafe fn indices(tess: &'a mut Self::TessRepr) -> Result<Self::IndexSliceRepr, TessMapError> {
     match tess.raw.index_buffer {
@@ -257,7 +257,7 @@ where
   W: 'a + TessVertexData<Interleaved, Data = Vec<W>>,
 {
   type InstanceSliceRepr = BufferSlice<'a, W>;
-  type InstanceSliceMutRepr = BufferSliceMut<'a, W>;
+  type InstanceSliceMutRepr = BufferSliceMut<'a, W, { WebGl2RenderingContext::ARRAY_BUFFER }>;
 
   unsafe fn instances(
     tess: &'a mut Self::TessRepr,
@@ -286,8 +286,8 @@ where
   W: Vertex,
 {
   raw: TessRaw<I>,
-  vertex_buffers: Vec<Buffer<u8>>,
-  instance_buffers: Vec<Buffer<u8>>,
+  vertex_buffers: Vec<Buffer<u8, { WebGl2RenderingContext::ARRAY_BUFFER }>>,
+  instance_buffers: Vec<Buffer<u8, { WebGl2RenderingContext::ARRAY_BUFFER }>>,
   _phantom: PhantomData<*const (V, W)>,
 }
 
@@ -384,7 +384,7 @@ where
   T: 'a,
 {
   type VertexSliceRepr = BufferSlice<'a, T>;
-  type VertexSliceMutRepr = BufferSliceMut<'a, T>;
+  type VertexSliceMutRepr = BufferSliceMut<'a, T, { WebGl2RenderingContext::ARRAY_BUFFER }>;
 
   unsafe fn vertices(tess: &'a mut Self::TessRepr) -> Result<Self::VertexSliceRepr, TessMapError> {
     if tess.vertex_buffers.is_empty() {
@@ -416,7 +416,7 @@ where
   W: TessVertexData<Deinterleaved, Data = Vec<DeinterleavedData>>,
 {
   type IndexSliceRepr = BufferSlice<'a, I>;
-  type IndexSliceMutRepr = BufferSliceMut<'a, I>;
+  type IndexSliceMutRepr = BufferSliceMut<'a, I, { WebGl2RenderingContext::ELEMENT_ARRAY_BUFFER }>;
 
   unsafe fn indices(tess: &'a mut Self::TessRepr) -> Result<Self::IndexSliceRepr, TessMapError> {
     match tess.raw.index_buffer {
@@ -443,7 +443,7 @@ where
   T: 'a,
 {
   type InstanceSliceRepr = BufferSlice<'a, T>;
-  type InstanceSliceMutRepr = BufferSliceMut<'a, T>;
+  type InstanceSliceMutRepr = BufferSliceMut<'a, T, { WebGl2RenderingContext::ARRAY_BUFFER }>;
 
   unsafe fn instances(
     tess: &'a mut Self::TessRepr,
@@ -473,7 +473,7 @@ where
 fn build_interleaved_vertex_buffer<V>(
   webgl2: &mut WebGL2,
   vertices: Option<Vec<V>>,
-) -> Result<Option<Buffer<V>>, TessError>
+) -> Result<Option<Buffer<V, { WebGl2RenderingContext::ARRAY_BUFFER }>>, TessError>
 where
   V: Vertex,
 {
@@ -484,7 +484,7 @@ where
       let vb = if vertices.is_empty() {
         None
       } else {
-        let vb = Buffer::from_vec(webgl2, vertices, WebGl2RenderingContext::ARRAY_BUFFER)?;
+        let vb = Buffer::from_vec(webgl2, vertices)?;
 
         // force binding as it’s meaningful when a vao is bound
         webgl2
@@ -506,7 +506,7 @@ where
 fn build_deinterleaved_vertex_buffers<V>(
   webgl2: &mut WebGL2,
   vertices: Option<Vec<DeinterleavedData>>,
-) -> Result<Vec<Buffer<u8>>, TessError>
+) -> Result<Vec<Buffer<u8, { WebGl2RenderingContext::ARRAY_BUFFER }>>, TessError>
 where
   V: Vertex,
 {
@@ -516,11 +516,7 @@ where
         .into_iter()
         .zip(V::vertex_desc())
         .map(|(attribute, fmt)| {
-          let vb = Buffer::from_vec(
-            webgl2,
-            attribute.into_vec(),
-            WebGl2RenderingContext::ARRAY_BUFFER,
-          )?;
+          let vb = Buffer::from_vec(webgl2, attribute.into_vec())?;
 
           // force binding as it’s meaningful when a vao is bound
           webgl2
@@ -539,12 +535,15 @@ where
 }
 
 /// Turn a [`Vec`] of indices to a [`Buffer`], if indices are present.
-fn build_index_buffer<I>(webgl2: &mut WebGL2, data: Vec<I>) -> Result<Option<Buffer<I>>, TessError>
+fn build_index_buffer<I>(
+  webgl2: &mut WebGL2,
+  data: Vec<I>,
+) -> Result<Option<Buffer<I, { WebGl2RenderingContext::ELEMENT_ARRAY_BUFFER }>>, TessError>
 where
   I: TessIndex,
 {
   let ib = if !data.is_empty() {
-    let ib = Buffer::from_vec(webgl2, data, WebGl2RenderingContext::ELEMENT_ARRAY_BUFFER)?;
+    let ib = Buffer::from_vec(webgl2, data)?;
 
     // force binding as it’s meaningful when a vao is bound
     webgl2
