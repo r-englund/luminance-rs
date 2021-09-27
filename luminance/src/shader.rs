@@ -1244,9 +1244,9 @@ where
   /// Create a [`ShaderData`] out of a set of values.
   pub fn from_slice(
     ctx: &mut impl GraphicsContext<Backend = B>,
-    values: impl AsRef<[T]>,
+    values: impl IntoIterator<Item = T>,
   ) -> Result<Self, ShaderDataError> {
-    let repr = unsafe { ctx.backend().new_shader_data(values)? };
+    let repr = unsafe { ctx.backend().new_shader_data(values.into_iter())? };
     Ok(ShaderData { repr })
   }
 

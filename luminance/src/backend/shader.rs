@@ -64,7 +64,7 @@ pub unsafe trait ShaderData<T> {
   /// Build a new shader data from some values.
   unsafe fn new_shader_data(
     &mut self,
-    values: impl AsRef<[T]>,
+    values: impl Iterator<Item = T>,
   ) -> Result<Self::ShaderDataRepr, ShaderDataError>;
 
   /// Access an item at index `i`.

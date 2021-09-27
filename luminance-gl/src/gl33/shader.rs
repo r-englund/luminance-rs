@@ -725,9 +725,10 @@ unsafe impl ShaderData<[f32; 2]> for GL33 {
 
   unsafe fn new_shader_data(
     &mut self,
-    values: impl AsRef<[[f32; 2]]>,
+    values: impl Iterator<Item = [f32; 2]>,
   ) -> Result<Self::ShaderDataRepr, luminance::shader::ShaderDataError> {
-    Ok(Buffer::from_vec(self, values.as_ref().to_owned()))
+    let values: Vec<_> = values.collect();
+    Ok(Buffer::from_vec(self, values.to_owned()))
   }
 
   unsafe fn get_shader_data(shader_data: &Self::ShaderDataRepr, i: usize) -> Option<[f32; 2]> {

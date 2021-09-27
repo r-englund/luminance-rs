@@ -137,7 +137,7 @@ pub unsafe trait GraphicsContext: Sized {
   /// See the documentation of [`ShaderData::from_slice`] for further details.
   fn new_shader_data<T>(
     &mut self,
-    values: impl AsRef<[T]>,
+    values: impl IntoIterator<Item = T>,
   ) -> Result<ShaderData<Self::Backend, T>, ShaderDataError>
   where
     Self::Backend: ShaderDataBackend<T>,

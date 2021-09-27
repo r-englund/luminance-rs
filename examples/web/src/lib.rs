@@ -275,6 +275,7 @@ examples! {
   "query-info", query_info,
   "mrt", mrt,
   "skybox", skybox,
+  "shader-data", shader_data,
 
   funtests:
   "funtest-tess-no-data", funtest_tess_no_data,
